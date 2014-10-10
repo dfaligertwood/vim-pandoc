@@ -4,226 +4,165 @@ import os
 import os.path
 import operator
 from glob import glob
+import json
 import subprocess as sp
 
-def make_title_ascii(title):
-    import unicodedata
-    if type(title) != str :
-        title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore')
-    else :
-        title = str(title)
-    return title
-
-
-try:
-    local_bib_extensions = vim.vars["pandoc#biblio#bib_extensions"]
-except:
-    local_bib_extensions = []
-
-bib_extensions = ["bib", "bibtex", "ris", "mods", "json", "enl", "wos", "medline", "copac", "xml"]
-
 def find_bibfiles():
+
+    try:
+        local_bib_extensions = vim.vars["pandoc#biblio#bib_extensions"]
+    except:
+        local_bib_extensions = []
+
+    bib_extensions = ["bib",
+                      "bibtex",
+                      "ris",
+                      "json", 
+                      "enl", 
+                      "wos", 
+                      "medline", 
+                      "copac", 
+                      "xml"]
+
+    search_methods = {"b": b_search(),
+                      "c": c_search(),
+                      "l": l_search(),
+                      "t": t_search(),
+                      "g": g_search()}
+
     sources = vim.vars["pandoc#biblio#sources"]
-    bibfiles = []
-    if "b" in sources and vim.current.buffer.name not in (None, ""):
-        file_name, ext = os.path.splitext(vim.current.buffer.name)
-        # we check for files named after the current file in the current dir
-        bibfiles.extend([os.path.abspath(f) for f in glob(file_name + ".*") if os.path.splitext(f)[1] in local_bib_extensions])
+    
+    def b_search():
+        # Search for bibiographies with the same name as the current file in the
+        # current dir.
 
-    # we search for any bibliography in the current dir
-    if "c" in sources:
-        bibfiles.extend([os.path.abspath(f) for f in glob("*.*") if f.split(".")[-1] in local_bib_extensions])
+        if vim.current.buffer.name in (None, ""): return []
 
-    # we search in pandoc's local data dir
-    if "l" in sources:
-        b = ""
+        file_name = os.path.splitext(vim.current.buffer.name)[0]
+        search_paths = [file_name + "." + f for f in local_bib_extensions]
+
+        bibfiles = [os.path.abspath(f) for f in search_paths if os.path.exists(f)]
+        return bibfiles
+
+    def c_search():
+        # Search for any other bibliographies in the current dir. N.B. this does
+        # not currently stop bibliographies picked up in b_search() from being found.
+        # Is this an issue?
+
+        relative_bibfiles = [glob("*." + f) for f in local_bib_extensions]
+        bibfiles = [os.path.abspath(f) for f in relative_bibfiles]
+        return bibfiles
+
+    def l_search():
+        # Search for bibliographies in the pandoc data dirs.
+
         if os.path.exists(os.path.expandvars("$HOME/.pandoc/")):
             b = os.path.expandvars("$HOME/.pandoc/")
         elif os.path.exists(os.path.expandvars("%APPDATA%/pandoc/")):
             b = os.path.expandvars("%APPDATA%/pandoc/")
-        if b != "":
-            bibfiles.extend([os.path.abspath(f) for f in glob(b + "default.*") if f.split(".")[-1] in bib_extensions])
+        else
+            return []
+        
+        search_paths = [b + "default." + f for f in bib_extensions]
+        bibfiles = [os.path.abspath(f) for f in search_paths if os.path.exists(f)]
+        return bibfiles
 
-    # we search for bibliographies in texmf
-    if "t" in sources and vim.eval("executable('kpsewhich')") != '0':
+    def t_search():
+        # Search for bibliographies in the texmf data dirs.
+
+        if vim.eval("executable('kpsewhich')") == '0': return []
+
         texmf = sp.Popen(["kpsewhich", "-var-value", "TEXMFHOME"], stdout=sp.PIPE, stderr=sp.PIPE).\
-                    communicate()[0].strip()
+                communicate()[0].strip()
+        
         if os.path.exists(texmf):
-            bibfiles.extend([os.path.abspath(f) for f in glob(texmf + "/*") if f.split(".")[-1] in bib_extensions])
+            search_paths = [texmf + "/*." + f for f in bib_extensions]
+            relative_bibfiles = [glob(f) for f in search_paths]
+            bibfiles = [os.path.abspath(f) for f in relative_bibfiles]
+            return bibfiles
 
-    # we append the items in g:pandoc#biblio#bibs, if set
-    if "g" in sources:
-        bibfiles.extend(vim.vars["pandoc#biblio#bibs"])
+        return []
 
-    # we check if the items in bibfiles are readable and not directories
-    if bibfiles != []:
-        bibfiles = list(set(filter(lambda f : os.access(f, os.R_OK) and not os.path.isdir(f), bibfiles)))
+    def g_search():
+        # Search for bibliographies in the directories definied in pandoc#biblio#bibs
+
+        return [f for f in vim.vars["pandoc#biblio#bibs"]]
+
+    bibfiles = []
+    for f in sources:
+        bibfiles.extend(search_methods.get(f))
 
     return bibfiles
 
 
-# SUGGESTIONS
 
-bibtex_title_search = re.compile("^\s*[Tt]itle\s*=\s*{(?P<title>\S.*?)}.{,1}\n", re.MULTILINE | re.DOTALL)
-bibtex_booktitle_search = re.compile("^\s*[Bb]ooktitle\s*=\s*{(?P<booktitle>\S.*?)}.{,1}\n", re.MULTILINE | re.DOTALL)
+def bibliography_to_json(bibliography):
+    # Calls pandoc-citeproc to convert a bibliography to JSON.
+    #
+    # Expects bibliography to be a file path.
+    #
+    # Returns an Array of CSL formatted Dicts, corresponding to bibliography
+    # entries.
+    # If this does not work, returns empty Array. Should probably raise an error
+    # something. Will let someone who understands this better deal with that....
 
-def get_bibtex_suggestions(text, query, use_bibtool=False, bib=None):
-    global bibtex_title_search
-    global bibtex_booktitle_search
-    global bibtex_author_search
-    global bibtex_editor_search
-    global bibtex_crossref_search
+    # Also probably needs to be rewritten so this parsing occurs at file load time,
+    # and the bibliography is stored elsewhere. Not sure how best to do this offhand.
 
-    entries = []
+    # Additional query: If we are to support YAML frontmatter, perhaps change this to import yaml?
 
-    if use_bibtool:
-        bibtex_id_search = re.compile(".*{\s*(?P<id>.*),")
-
-        args = "-- select{$key title booktitle author editor \"%(query)s\"}'" % {"query": query}
-        text = sp.Popen(["bibtool", args, bib], stdout=sp.PIPE, stderr=sp.PIPE).communicate()[0]
-    else:
-        bibtex_id_search = re.compile(".*{\s*(?P<id>" + query + ".*),")
-
-    for entry in [i for i in re.split("\n@", text)]:
-        entry_dict = {}
-        i1 = bibtex_id_search.match(entry)
-        if i1:
-            entry_dict["word"] = i1.group("id")
-
-            title = "..."
-            # search for title
-            i2 = bibtex_title_search.search(entry)
-            if i2:
-                title = i2.group("title")
-            else:
-                i3 = bibtex_booktitle_search.search(entry)
-                if i3:
-                    title = i3.group("booktitle")
-            title = re.sub("[{}]", "", re.sub("\s+", " ", title))
-
-            entry_dict["menu"] = make_title_ascii(title)
-
-            entries.append(entry_dict)
-
-    return entries
-
-
-ris_title_search = re.compile("^(TI|T1|CT|BT|T2|T3)\s*-\s*(?P<title>.*)\n", re.MULTILINE)
-
-def get_ris_suggestions(text, query):
-    global ris_title_search
-    global ris_author_search
-
-    entries = []
-
-    ris_id_search = re.compile("^ID\s*-\s*(?P<id>" +  query + ".*)\n", re.MULTILINE)
-
-    for entry in re.split("ER\s*-\s*\n", text):
-        entry_dict = {}
-        i1 = ris_id_search.search(entry)
-        if i1:
-            entry_dict["word"] = i1.group("id")
-            title = "..."
-            i2 = ris_title_search.search(entry)
-            if i2:
-                title = i2.group("title")
-
-            entry_dict["menu"] = make_title_ascii(title)
-            entries.append(entry_dict)
-
-    return entries
-
-def get_mods_suggestions(text, query):
-    import xml.etree.ElementTree as etree
-    entries = []
-
-    bib_data = etree.fromstring(text)
-    if bib_data.tag == "mods":
-        entry_dict = {}
-        entry_id = bib_data.get("ID")
-        if re.match(query, str(entry_id)):
-            entry_dict["word"] = entry_id
-            title = " ".join([s.strip() for s in bib_data.find("titleInfo").find("title").text.split("\n")])
-            entry_dict["menu"] = make_title_ascii(title)
-            entries.append(entry_dict)
-    elif bib_data.tag == "modsCollection":
-        for mod in bib_data.findall("mods"):
-            entry_dict = {}
-            entry_id = mod.get("ID")
-            if re.match(query, str(entry_id)):
-                entry_dict["word"] = entry_id
-                title = " ".join([s.strip() for s in bib_data.find("titleInfo").find("title").text.split("\n")])
-                entry_dict["menu"] = make_title_ascii(title)
-                entries.append(entry_dict)
-
-    return entries
-
-def get_json_suggestions(text, query):
-    import json
-
-    entries = []
-    string_matches = [u'title', u'id']
-    name_matches = [u'author', u'editor']
+    command = ["pandoc-citeproc", "-j", bibliography]
 
     try:
-        data = json.loads(text)
+        raw_bib = sp.Popen(command, stdout=sp.PIPE, stderr=sp.PIPE).communicate()[0]
+        bibliography = json.loads(raw_bib)
     except:
-        return entries
+        bibliography = []
 
-    if type(data) != list: return entries
+    return bibliography
 
-    def check(string):
-        return re.search(query, string, re.IGNORECASE)
 
-    def test_entry(entry):
-        if type(entry) != dict: return False
-        filter_values = []
-        for string in [entry.get(k) for k in string_matches]:
-            if type(string) == unicode and check(string): return True
-        for names in [entry.get(k) for k in name_matches]:
-            if type(names) == list:
-                for person in names:
-                    if type(person.get(u'family')) == unicode:
-                        if check(person[u'family']): return True
-                    elif type(person.get(u'literal')) == unicode:
-                        if check(person[u'literal']): return True
 
-    for entry in filter(test_entry, data):
-        entries.append({"word": entry.get('id'), 
-                        "menu": make_title_ascii(entry.get("title", "No Title"))
-                        })
+def csl_parse_plain(entry, variable_name):
+    # Currently a placeholder. Will parse 'plain' CSL variables and return an array of
+    # strings for matching.
 
-    return entries
+def csl_parse_name(entry, variable_name):
+    # Currently a placeholder. Will parse 'name' CSL variables and return an array of
+    # strings for matching.
+
+def csl_parse_date(entry, variable_name):
+    # Currently a placeholder. Will parse 'date' CSL variables and return an array of
+    # strings for matching.
+
+def csl_parse_something_else(entry, variable_name):
+    # I have a feeling that there is another type of variable.
+
+def match(entry, query):
+    # Matching engine. Basic 'fuzzy' match: break query into strings based on spaces &c.
+    # Then compare with chosen matching variables. If a match is found, return true.
+    # Maybe have matching variables configurable?
+
+    # Expects entry to be CSL-formatted dict. Query to be a string.
+
+def get_bibliography_suggestions(bibliography_path, query):
+    bibliography = bibliography_to_json(bibliography_path)
+    suggestions = [entry_to_completion(entry) for entry in bibliography if match(entry, query)]
+    return suggestions
+
+def entry_to_completion(entry):
+
 
 def get_suggestions():
     bibs = vim.eval("b:pandoc_biblio_bibs")
     if len(bibs) < 1:
-       bibs = find_bibfiles()
+        bibs = find_bibfiles()
     query = vim.eval("a:partkey")
 
-    matches = []
-
     for bib in bibs:
-        bib_type = os.path.basename(bib).split(".")[-1].lower()
-        with open(bib) as f:
-            text = f.read()
-
-        ids = []
-        if bib_type == "mods":
-            ids = get_mods_suggestions(text, query)
-        elif bib_type == "ris":
-            ids = get_ris_suggestions(text, query)
-        elif bib_type == "json":
-            ids = get_json_suggestions(text, query)
-        elif bib_type in ("bib", "bibtex"):
-            if vim.vars["pandoc#biblio#use_bibtool"] == 1 and vim.eval("executable('bibtool')") == '1':
-                ids = get_bibtex_suggestions(bib, query, True, bib)
-            else:
-                ids = get_bibtex_suggestions(text, query)
-
-        matches.extend(ids)
+        matches.extend(get_bibliography_suggestions(bib, query))
 
     if len(matches) > 0:
         matches = sorted(matches, key=operator.itemgetter("word"))
-    return matches
 
+    return matches
