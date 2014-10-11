@@ -7,6 +7,17 @@ from glob import glob
 import json
 import subprocess as sp
 
+class CiteprocSource():
+    def __init__(self, bib):
+
+
+class SourceCollator():
+
+class CSLItem():
+
+class CiteprocQuery():
+
+
 def find_bibfiles():
 
     try:
