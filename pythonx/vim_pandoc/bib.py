@@ -60,7 +60,7 @@ def find_bibfiles():
             b = os.path.expandvars("$HOME/.pandoc/")
         elif os.path.exists(os.path.expandvars("%APPDATA%/pandoc/")):
             b = os.path.expandvars("%APPDATA%/pandoc/")
-        else
+        else:
             return []
         
         search_paths = [b + "default." + f for f in bib_extensions]
@@ -84,7 +84,7 @@ def find_bibfiles():
         return []
 
     def g_search():
-        # Search for bibliographies in the directories definied in pandoc#biblio#bibs
+        # Search for bibliographies in the directories defined in pandoc#biblio#bibs
 
         return [f for f in vim.vars["pandoc#biblio#bibs"]]
 
@@ -121,22 +121,108 @@ def bibliography_to_json(bibliography):
 
     return bibliography
 
+def csl_variable_parse(entry, variable_name):
 
+    def plain(variable_contents):
+        # Currently a placeholder. Will parse 'plain' CSL variables and return an array of
+        # strings for matching.
+        return variable_contents
 
-def csl_parse_plain(entry, variable_name):
-    # Currently a placeholder. Will parse 'plain' CSL variables and return an array of
-    # strings for matching.
+    def number(variable_contents):
+        # Returns plain. Exists in case we decide to treat number variables seperately in
+        # future.
+        return plain(variable_contents)
 
-def csl_parse_name(entry, variable_name):
-    # Currently a placeholder. Will parse 'name' CSL variables and return an array of
-    # strings for matching.
+    def name(variable_contents):
+        # Currently a placeholder. Will parse 'name' CSL variables and return an array of
+        # strings for matching.
+        if not variable_contents: return []
 
-def csl_parse_date(entry, variable_name):
-    # Currently a placeholder. Will parse 'date' CSL variables and return an array of
-    # strings for matching.
+    def date(variable_contents):
+        # Currently a placeholder. Will parse 'date' CSL variables and return an array of
+        # strings for matching.
+        False
 
-def csl_parse_something_else(entry, variable_name):
-    # I have a feeling that there is another type of variable.
+    variable_type = {
+            "abstract": plain,
+            "annote": plain,
+            "archive": plain,
+            "archive_location": plain,
+            "archive-place": plain,
+            "authority": plain,
+            "call-number": plain,
+            "citation-label": plain,
+            "citation-number": plain,
+            "collection-title": plain,
+            "container-title": plain,
+            "container-title-short": plain,
+            "dimensions": plain,
+            "doi": plain,
+            "event": plain,
+            "event-place": plain,
+            "first-reference-note-number": plain,
+            "genre": plain,
+            "isbn": plain,
+            "issn": plain,
+            "jurisdiction": plain,
+            "keyword": plain,
+            "locator": plain,
+            "medium": plain,
+            "note": plain,
+            "original-publisher": plain,
+            "original-publisher-place": plain,
+            "original-title": plain,
+            "page": plain,
+            "page-first": plain,
+            "pmcid": plain,
+            "pmid": plain,
+            "publisher": plain,
+            "publisher-place": plain,
+            "references": plain,
+            "reviewed-title": plain,
+            "scale": plain,
+            "section": plain,
+            "source": plain,
+            "status": plain,
+            "title": plain,
+            "title-short": plain,
+            "url": plain,
+            "version": plain,
+            "year-suffix": plain,
+
+            "chapter-number": number,
+            "collection-number": number,
+            "edition": number,
+            "issue": number,
+            "number": number,
+            "number-of-pages": number,
+            "number-of-volumes": number,
+            "volume": number,
+
+            "accessed": date,
+            "container": date,
+            "event-date": date,
+            "issued": date,
+            "original-date": date,
+            "submitted": date,
+
+            "author": name,
+            "collection-editor": name,
+            "composer": name,
+            "container-author": name,
+            "director": name,
+            "editor": name,
+            "editorial-director": name,
+            "illustrator": name,
+            "interviewer": name,
+            "original-author": name,
+            "recipient": name,
+            "reviewed-author": name,
+            "translator": name,
+            }
+
+    return variable_type[variable_name](entry.get(variable_name, False))
+
 
 def match(entry, query):
     # Matching engine. Basic 'fuzzy' match: break query into strings based on spaces &c.
@@ -145,13 +231,15 @@ def match(entry, query):
 
     # Expects entry to be CSL-formatted dict. Query to be a string.
 
+    False
+
 def get_bibliography_suggestions(bibliography_path, query):
     bibliography = bibliography_to_json(bibliography_path)
     suggestions = [entry_to_completion(entry) for entry in bibliography if match(entry, query)]
     return suggestions
 
 def entry_to_completion(entry):
-
+    False
 
 def get_suggestions():
     bibs = vim.eval("b:pandoc_biblio_bibs")
